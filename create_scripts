@@ -1,0 +1,53 @@
+#!/usr/bin/env python
+
+from math import *
+from string import Template
+import sys, re, os, shutil, numpy
+
+###################### Simulation parameters #######################
+
+r0min = 6
+r0max = 20
+r0s = numpy.array(range(10*r0min,10*r0max+1))/10.0
+
+########################## SLURM file ##########################
+lines = """\
+#!/bin/bash -l
+# Set the number of nodes
+#SBATCH -N 1
+
+# Set the number of tasks/cores per node required 
+#SBATCH -n 44
+
+# Set the walltime of the job to 1 hour (format is hh:mm:ss)
+#SBATCH -t 240:00:00
+
+# E-mail on begin (b), abort (a) and end (e) of job
+#SBATCH --mail-type=ALL
+
+# E-mail address of recipient
+#SBATCH --mail-user=barry.wardell@ucd.ie
+
+# Specifies the jobname
+#SBATCH --job-name="SS $r0"
+
+# Change working directory to current directory
+cd $$SLURM_SUBMIT_DIR
+
+echo "Running on `hostname`"
+echo "Started at `date`"
+
+module load mathematica
+time WolframKernel -run "r0=$r0; Get[\"../d2R-SS-r0.wl\"]; Quit[];" >& logfile
+
+echo "Done at `date`"
+"""
+
+############### Create simulation dir and copy files ###############
+for r0 in r0s:
+    targetdir = "r0_" + str(r0)
+    print("Creating simulation " + targetdir)
+    os.makedirs(targetdir)
+
+    with open(targetdir+"/sonic.sh", 'w') as slurmfile:
+        slurmfile.write(re.sub(r'\n *',r'\n',Template(lines).substitute(locals())))

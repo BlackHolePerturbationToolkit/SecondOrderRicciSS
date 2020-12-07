@@ -38,7 +38,7 @@ echo "Running on `hostname`"
 echo "Started at `date`"
 
 module load mathematica
-time WolframKernel -run "r0=$r0; Get[\"../d2R-SS-r0.wl\"]; Quit[];" >& logfile
+time WolframKernel -run "r0=$r0; Get[\\"../d2R-SS-r0.wl\\"]; Quit[];" >& logfile
 
 echo "Done at `date`"
 """

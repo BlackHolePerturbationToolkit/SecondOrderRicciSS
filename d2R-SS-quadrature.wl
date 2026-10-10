@@ -49,6 +49,10 @@ If[!MemberQ[{"d2R", "minusbox", "hSS"}, what], Print["what must be d2R, minusbox
 mpmax = 10; nGL = 20; nBeta = 32; alphaHP = 1/50; WP = 32; minDigits = 14; minAccuracy = 16; maxDoublings = 3;
 (* quadrature resolution overrides (convergence checks): SS_QUAD_NGL, SS_QUAD_NBETA *)
 With[{v = Environment["SS_QUAD_NGL"]}, If[StringQ[v], nGL = ToExpression[v]]];
+(* geometric ratio of the alpha panels (default 2) and a test mode that evaluates only the given offsets
+   r - r0 (e.g. "{0, 1/100}"), prints the time per radius and writes the rotated modes with Put *)
+gradeRatio = 2; With[{v = Environment["SS_QUAD_GRADE"]}, If[StringQ[v], gradeRatio = ToExpression[v]]];
+testOffsets = With[{v = Environment["SS_QUAD_TEST"]}, If[StringQ[v], ToExpression[v], None]];
 With[{v = Environment["SS_QUAD_NBETA"]}, If[StringQ[v], nBeta = ToExpression[v]]];
 
 
@@ -101,7 +105,7 @@ defs := (
   (* rotated modes {i, l, m', value} of each quantity at one r *)
   rotatedModes[r_, r0_] := Module[{a, edges, xs, ws, alphas, walpha, betas, wbeta, hp, cc, comps, f, A, B, W},
     a = If[r == r0, 10^-10, Abs[r - r0]/r0];   (* r0 (minusbox only): no particle scale, grade from 1e-10 *)
-    edges = Join[{0}, Select[a 2^Range[-3, 60], # < Pi &], {Pi}];
+    edges = Join[{0}, Select[a gradeRatio^Range[-3 Log[2, gradeRatio]^-1, 60 Log[2, gradeRatio]^-1], # < Pi &], {Pi}];
     {xs, ws} = glNodes[nGL];
     alphas = Flatten[Table[(edges[[k]] + edges[[k + 1]])/2 + (edges[[k + 1]] - edges[[k]])/2 xs, {k, Length[edges] - 1}]];
     walpha = Flatten[Table[(edges[[k + 1]] - edges[[k]])/2 ws, {k, Length[edges] - 1}]];
@@ -132,9 +136,14 @@ defs := (
 
 LaunchKernels[nk];
 DistributeDefinitions[defs];
-With[{v = {$here, what, mpmax, nGL, nBeta, alphaHP, WP, minDigits, minAccuracy, maxDoublings, lmax}},
-  ParallelEvaluate[{$here, what, mpmax, nGL, nBeta, alphaHP, WP, minDigits, minAccuracy, maxDoublings, lmax} = v; defs, DistributedContexts -> None]];
+With[{v = {$here, what, mpmax, nGL, nBeta, alphaHP, WP, minDigits, minAccuracy, maxDoublings, lmax, gradeRatio}},
+  ParallelEvaluate[{$here, what, mpmax, nGL, nBeta, alphaHP, WP, minDigits, minAccuracy, maxDoublings, lmax, gradeRatio} = v; defs, DistributedContexts -> None]];
 defs;
+If[testOffsets =!= None,
+  Module[{res = ParallelMap[Module[{t = AbsoluteTime[], v = rotatedModes[r0 + #, r0]}, {#, AbsoluteTime[] - t, v}] &, testOffsets,
+       Method -> "FinestGrained", DistributedContexts -> None]},
+    Do[Print["  r - r0 = ", x[[1]], ": ", Round[x[[2]], 0.1], " s"], {x, res}];
+    Put[res, out]; Print["wrote ", out]; Exit[0]]];
 rs = Select[r0 + Range[-100 drmax, 100 drmax]/100, # != r0 &];
 (* minusbox is regular at r0: evaluated there directly (the cluster script averaged r0 -+ 1e-4) *)
 If[what === "minusbox", rs = Append[rs, r0]];

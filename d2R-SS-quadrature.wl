@@ -101,9 +101,17 @@ defs := (
       v = combine[hps[[k]][SetPrecision[x, wp], SetPrecision[b, wp]]];
       If[AllTrue[Flatten[v], Precision[#] >= minDigits || Accuracy[#] >= minAccuracy &] || k == Length[hps], Return[v]];
       k++]];
+  (* signs of the components under beta -> -beta ({quantity, component} array of +-1), from the compiled
+     functions at two generic nodes; None unless every ratio is +-1 to 1e-10 *)
+  parity[cc_] := Module[{nodes = Tuples[{{0.37, 1.91}, {0.53, 2.29}}], v, w, s},
+    v = Table[combine[Map[#[n[[1]], n[[2]]] &, cc, {2}]], {n, nodes}];
+    w = Table[combine[Map[#[n[[1]], -n[[2]]] &, cc, {2}]], {n, nodes}];
+    s = Quiet[Round[w[[1]]/v[[1]]]];
+    If[!ArrayQ[s, _, MemberQ[{1, -1}, #] &], Return[None]];
+    If[Max[Abs[Flatten[w - (s # &) /@ v]]] <= 10^-10 Max[Abs[Flatten[v]]], s, None]];
   glNodes[n_] := glNodes[n] = Transpose[NumericalDifferentialEquationAnalysis`GaussianQuadratureWeights[n, -1, 1, 40]];
   (* rotated modes {i, l, m', value} of each quantity at one r *)
-  rotatedModes[r_, r0_] := Module[{a, edges, xs, ws, alphas, walpha, betas, wbeta, hp, cc, comps, f, A, B, W},
+  rotatedModes[r_, r0_] := Module[{a, edges, xs, ws, alphas, walpha, betas, wbeta, hp, cc, comps, f, A, B, W, sg, half},
     a = If[r == r0, 10^-10, Abs[r - r0]/r0];   (* r0 (minusbox only): no particle scale, grade from 1e-10 *)
     edges = Join[{0}, Select[a gradeRatio^Range[-3 Log[2, gradeRatio]^-1, 60 Log[2, gradeRatio]^-1], # < Pi &], {Pi}];
     {xs, ws} = glNodes[nGL];
@@ -112,11 +120,18 @@ defs := (
     betas = -Pi + 2 Pi Range[0, nBeta - 1]/nBeta; wbeta = 2 Pi/nBeta;
     hp = With[{opt = hpOpt[r, r0]}, Table[hpFunction[opt, WP 2^k], {k, 0, maxDoublings}]];
     cc = componentSets[N[r], N[r0]];
+    (* every component is even or odd in beta (signs measured here, not assumed): evaluate at beta in [0, Pi]
+       (node 1 = -Pi = Pi and nodes nBeta/2 + 1 ... nBeta) and mirror the rest; all nodes if a sign is unclear *)
+    sg = parity[cc];
+    half = If[sg === None, Range[nBeta], Join[{1}, Range[nBeta/2 + 1, nBeta]]];
     comps = Table[
       If[al < alphaHP,
-        Table[hpEval[hp, al, b], {b, betas}],
-        With[{x = N[al]}, Table[combine[Map[#[x, N[b]] &, cc, {2}]], {b, betas}]]],
+        Table[hpEval[hp, al, b], {b, betas[[half]]}],
+        With[{x = N[al]}, Table[combine[Map[#[x, N[b]] &, cc, {2}]], {b, betas[[half]]}]]],
       {al, alphas}];
+    If[sg =!= None,      (* node j <-> -beta at nBeta + 2 - j *)
+      comps = Map[Function[row, Table[Which[j == 1, row[[1]], j > nBeta/2, row[[j - nBeta/2 + 1]],
+           True, sg row[[nBeta + 2 - j - nBeta/2 + 1]]], {j, nBeta}]], comps]];
     (* {quantity, component, alpha, beta}; machine reals (N[] would keep the WP-digit values) *)
     comps = Developer`ToPackedArray[Transpose[SetPrecision[comps, MachinePrecision], {3, 4, 1, 2}]];
     f = N[1 - 2/r];

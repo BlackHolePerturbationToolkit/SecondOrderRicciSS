@@ -25,6 +25,10 @@
                 and GD (hSS.wl GDhSS) its gauge-damping term, together the gauge-damped Lorenz operator of
                 the field equations (checked against SecondOrderSelfForce E0 with GaugeDamped -> True)
                                                     -> src.h5 layout; r0 rows evaluated at r0 itself
+     "minusboxngd" d2R[hS,hS] - Box[hSS]: as minusbox without the gauge-damping term (2026-10-23), which the
+                effective source can add mode by mode from the hSS modes (it is local in each mode and regular at
+                r0); without it every component keeps a definite parity in beta and the other-parity modes
+                (i = 2, 4, 8) vanish            -> src.h5 layout; r0 rows evaluated at r0 itself
      "hSS"      hSS and d/dr hSS (hSS.wl), BLS fields, d/dr including the r dependence of the BLS
                 factors (Convert-hSS.nb)            -> hP.h5 layout: "SS/i{i}l{l}m{m}" with columns
                                                        Re h, Im h, Re dh, Im dh, and "r"; r0 rows zero
@@ -45,7 +49,7 @@ If[Length[argv] < 3, Print["usage: d2R-SS-quadrature.wl what r0 out.h5 [lmax] [d
 lmax = If[Length[argv] >= 4, ToExpression[argv[[4]]], 10];
 drmax = If[Length[argv] >= 5, ToExpression[argv[[5]]], 2];
 nk = If[Length[argv] >= 6, ToExpression[argv[[6]]], 12];
-If[!MemberQ[{"d2R", "minusbox", "hSS"}, what], Print["what must be d2R, minusbox or hSS"]; Exit[1]];
+If[!MemberQ[{"d2R", "minusbox", "minusboxngd", "hSS"}, what], Print["what must be d2R, minusbox, minusboxngd or hSS"]; Exit[1]];
 mpmax = 10; nGL = 20; nBeta = 32; alphaHP = 1/50; WP = 32; minDigits = 14; minAccuracy = 16; maxDoublings = 3;
 (* quadrature resolution overrides (convergence checks): SS_QUAD_NGL, SS_QUAD_NBETA *)
 With[{v = Environment["SS_QUAD_NGL"]}, If[StringQ[v], nGL = ToExpression[v]]];
@@ -80,8 +84,9 @@ defs := (
   componentSets[r_, r0_] := Switch[what,
     "d2R", {d2R\[Mu]\[Nu][r, r0][[2]]},
     "minusbox", {d2R\[Mu]\[Nu][r, r0][[2]], BoxhSS\[Mu]\[Nu][r, r0][[2]], GDhSS\[Mu]\[Nu][r, r0][[2]]},
+    "minusboxngd", {d2R\[Mu]\[Nu][r, r0][[2]], BoxhSS\[Mu]\[Nu][r, r0][[2]]},
     "hSS", {hSS\[Mu]\[Nu][r, r0][[2]], drhSS\[Mu]\[Nu][r, r0][[2]]}];
-  combine[sets_] := If[what === "minusbox", {sets[[1]] - sets[[2]] - sets[[3]]}, sets];   (* {quantity(, its d/dr)} *)
+  combine[sets_] := Switch[what, "minusbox", {sets[[1]] - sets[[2]] - sets[[3]]}, "minusboxngd", {sets[[1]] - sets[[2]]}, _, sets];   (* {quantity(, its d/dr)} *)
   (* WP-digit evaluator of all components of all sets from the uncompiled bodies of the compiled
      functions (exact r, r0): CSE, then numeric constants (exact rationals and surds make the
      uncompiled evaluation ~400x slower) *)
@@ -112,7 +117,7 @@ defs := (
   glNodes[n_] := glNodes[n] = Transpose[NumericalDifferentialEquationAnalysis`GaussianQuadratureWeights[n, -1, 1, 40]];
   (* rotated modes {i, l, m', value} of each quantity at one r *)
   rotatedModes[r_, r0_] := Module[{a, edges, xs, ws, alphas, walpha, betas, wbeta, hp, cc, comps, f, A, B, W, sg, half},
-    a = If[r == r0, 10^-10, Abs[r - r0]/r0];   (* r0 (minusbox only): no particle scale, grade from 1e-10 *)
+    a = If[r == r0, 10^-10, Abs[r - r0]/r0];   (* r0 (minusbox, minusboxngd): no particle scale, grade from 1e-10 *)
     edges = Join[{0}, Select[a gradeRatio^Range[-3 Log[2, gradeRatio]^-1, 60 Log[2, gradeRatio]^-1], # < Pi &], {Pi}];
     {xs, ws} = glNodes[nGL];
     alphas = Flatten[Table[(edges[[k]] + edges[[k + 1]])/2 + (edges[[k + 1]] - edges[[k]])/2 xs, {k, Length[edges] - 1}]];
@@ -161,7 +166,7 @@ If[testOffsets =!= None,
     Put[res, out]; Print["wrote ", out]; Exit[0]]];
 rs = Select[r0 + Range[-100 drmax, 100 drmax]/100, # != r0 &];
 (* minusbox is regular at r0: evaluated there directly (the cluster script averaged r0 -+ 1e-4) *)
-If[what === "minusbox", rs = Append[rs, r0]];
+If[what === "minusbox" || what === "minusboxngd", rs = Append[rs, r0]];
 Print[what, ", r0 = ", r0, ": ", Length[rs], " radii, lmax = ", lmax, ", ", nk, " kernels"];
 t0 = AbsoluteTime[];
 data = Association[ParallelMap[(# -> rotatedModes[#, r0]) &, rs, Method -> "FinestGrained", DistributedContexts -> None]];
@@ -171,14 +176,14 @@ lmin[i_] := Switch[i, 1 | 2 | 3 | 6, 0, 4 | 5 | 8 | 9, 1, 7 | 10, 2];
 rside = Select[r0 + Range[-100 drmax, 100 drmax]/100, # != r0 &];
 rgrid = Join[Select[rside, # < r0 &], {r0, r0}, Select[rside, # > r0 &]];
 rot[q_, i_, l_, m_, rr_] := Sum[N[WignerD[{l, m, mp}, Pi, Pi/2, Pi/2]] data[rr][[q, i, l + 1, mp + Min[l, mpmax] + 1, 4]], {mp, -Min[l, mpmax], Min[l, mpmax]}];
-atr0[q_, i_, l_, m_] := If[what === "minusbox", rot[q, i, l, m, r0], 0.];
+atr0[q_, i_, l_, m_] := If[what === "minusbox" || what === "minusboxngd", rot[q, i, l, m, r0], 0.];
 lm[q_, i_, l_, m_] := Table[If[rr == r0, atr0[q, i, l, m], rot[q, i, l, m, rr]], {rr, rgrid}];
 srcName[i_, l_, m_] := "src i=" <> ToString[i] <> " l=" <> ToString[l] <> " m=" <> ToString[m];
 modesLM = Join[Flatten[Table[{i, l, m}, {i, 1, 7}, {l, lmin[i], lmax}, {m, l, 0, -2}], 2],
    Flatten[Table[{i, l, m}, {i, 8, 10}, {l, lmin[i], lmax}, {m, l - 1, 0, -2}], 2]];
 
 Which[
-  what === "d2R" || what === "minusbox",
+  what === "d2R" || what === "minusbox" || what === "minusboxngd",
   ds = Join[{"r" -> N[rgrid]}, (srcName @@ # -> ReIm[lm[1, Sequence @@ #]]) & /@ modesLM],
 
   what === "hSS",

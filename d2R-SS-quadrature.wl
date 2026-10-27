@@ -170,12 +170,18 @@ If[testOffsets =!= None,
     Put[res, out]; Print["wrote ", out]; Exit[0]]];
 rs = Select[r0 + Range[-100 drmax, 100 drmax]/100, # != r0 &];
 (* minusbox is regular at r0: evaluated there directly (the cluster script averaged r0 -+ 1e-4) *)
-If[what === "minusbox" || what === "minusboxngd", rs = Append[rs, r0]];
+(* r0 first: it costs ~4x any other radius (324 s vs ~80 s, lmax 2), so it is not left for the end of the queue *)
+If[what === "minusbox" || what === "minusboxngd", rs = Prepend[rs, r0]];
 (* gd: only r0 (both r0 rows of the src.h5 layout) *)
 If[what === "gd", rs = {r0}];
 Print[what, ", r0 = ", r0, ": ", Length[rs], " radii, lmax = ", lmax, ", ", nk, " kernels"];
 t0 = AbsoluteTime[];
-data = Association[ParallelMap[(# -> rotatedModes[#, r0]) &, rs, Method -> "FinestGrained", DistributedContexts -> None]];
+(* progress: <out>.progress, the radius count, then one line per radius as each finishes (appended by the subkernels) *)
+progress = out <> ".progress";
+With[{s = OpenWrite[progress]}, WriteString[s, what, " r0 = ", r0, ": ", Length[rs], " radii\n"]; Close[s]];
+data = Association[With[{pf = progress}, ParallelMap[Module[{t = AbsoluteTime[], v = rotatedModes[#, r0], s},
+     s = OpenAppend[pf]; WriteString[s, DateString[{"Hour", ":", "Minute", ":", "Second"}], "  r = ", N[#], "  ",
+       Round[AbsoluteTime[] - t, 0.1], " s\n"]; Close[s]; # -> v] &, rs, Method -> "FinestGrained", DistributedContexts -> None]]];
 Print["modes done in ", Round[AbsoluteTime[] - t0], " s"];
 
 lmin[i_] := Switch[i, 1 | 2 | 3 | 6, 0, 4 | 5 | 8 | 9, 1, 7 | 10, 2];
